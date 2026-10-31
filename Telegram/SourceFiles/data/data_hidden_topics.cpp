@@ -74,7 +74,7 @@ bool IsTopicHidden(PeerId peerId, MsgId rootId) {
 }
 
 int HiddenTopicsCount(PeerId peerId) {
-	return ranges::count(List(), peerId.value, &HiddenTopic::first);
+	return int(ranges::count(List(), peerId.value, &HiddenTopic::first));
 }
 
 void HideTopic(not_null<ForumTopic*> topic) {

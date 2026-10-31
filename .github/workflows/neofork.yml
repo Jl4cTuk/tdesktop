@@ -130,7 +130,7 @@ jobs:
             !${{ env.LibrariesPath }}\[qQ]t[_-]*
             ${{ env.LibrariesPath }}\cache_keys\*
             !${{ env.LibrariesPath }}\cache_keys\[qQ]t[_-]*
-          key: ${{ runner.OS }}-x64-release-libs-${{ env.CACHE_KEY }}
+          key: ${{ runner.OS }}-x64-release-libs-v2-${{ env.CACHE_KEY }}
           restore-keys: ${{ runner.OS }}-x64-release-libs-
 
       - name: Qt cache.
@@ -143,6 +143,16 @@ jobs:
           key: ${{ runner.OS }}-x64-release-qt-${{ env.CACHE_KEY }}
           restore-keys: ${{ runner.OS }}-x64-release-qt-
 
+      # Older caches lost wallet_engine.cpp and the Rust sources to the prune
+      # below while their stage keys stayed, drop the keys to rebuild them.
+      - name: Repair pruned Rust libraries.
+        shell: bash
+        run: |
+          if [ -d "$LibrariesPath/cache_keys" ] \
+            && [ ! -f "$LibrariesPath/tdesktop_rust/out/src/wallet_engine/wallet_engine.cpp" ]; then
+            rm -fv "$LibrariesPath"/cache_keys/{tlottie,wallet-engine,tdesktop_rust}
+          fi
+
       # Without skip-release: the Release build links the Release libraries.
       - name: Libraries.
         run: |
@@ -150,7 +160,7 @@ jobs:
 
       - name: Free up some disk space.
         shell: bash
-        run: find $LibrariesPath '(' '(' ! '(' -name '*.lib' -o -name '*.a' -o -name '*.exe' -o -name '*.h' -o -name '*.hpp' -o -name '*.inc' -o -name '*.cmake' -o -name '*.pc' -o -path '*/include/*' -o -path '*/objects-*' -o -path '*/cache_keys/*' -o -path '*/patches/*' -o -path '*/nv-codec-headers/*' ')' -type f ')' -o -empty ')' -delete
+        run: find $LibrariesPath '(' '(' ! '(' -name '*.lib' -o -name '*.a' -o -name '*.exe' -o -name '*.h' -o -name '*.hpp' -o -name '*.inc' -o -name '*.cmake' -o -name '*.pc' -o -path '*/include/*' -o -path '*/objects-*' -o -path '*/cache_keys/*' -o -path '*/patches/*' -o -path '*/nv-codec-headers/*' -o -path '*/src/wallet_engine/*' -o -path '*/tlottie/*' -o -path '*/wallet-engine/*' ')' -type f ')' -o -empty ')' -delete
 
       - name: Save ThirdParty cache.
         if: steps.cache-third-party.outputs.cache-hit != 'true'
@@ -253,8 +263,17 @@ jobs:
           path: |
             Libraries
             ThirdParty
-          key: ${{ runner.OS }}-release-libs-${{ hashFiles(format('{0}/{1}', env.REPO_NAME, env.PREPARE_PATH)) }}
+          key: ${{ runner.OS }}-release-libs-v2-${{ hashFiles(format('{0}/{1}', env.REPO_NAME, env.PREPARE_PATH)) }}
           restore-keys: ${{ runner.OS }}-release-libs-
+
+      # Older caches lost wallet_engine.cpp and the Rust sources to the prune
+      # below while their stage keys stayed, drop the keys to rebuild them.
+      - name: Repair pruned Rust libraries.
+        run: |
+          if [ -d Libraries/cache_keys ] \
+            && [ ! -f Libraries/local/src/wallet_engine/wallet_engine.cpp ]; then
+            rm -fv Libraries/cache_keys/{tlottie,wallet-engine,tdesktop_rust}
+          fi
 
       # Without skip-release: it would build Qt and crashpad in Debug only.
       - name: Libraries.
@@ -262,7 +281,7 @@ jobs:
           ./$REPO_NAME/Telegram/build/prepare/mac.sh silent
 
       - name: Free up some disk space.
-        run: find Libraries '(' '(' ! '(' -name '*.a' -o -name '*.h' -o -name '*.hpp' -o -name '*.inc' -o -name '*.cmake' -o -name '*.pc' -o -path '*/include/*' -o -path '*/objects-*' -o -path '*/cache_keys/*' -o -path '*/patches/*' -o -perm +111 ')' -type f ')' -o -empty ')' -delete
+        run: find Libraries '(' '(' ! '(' -name '*.a' -o -name '*.h' -o -name '*.hpp' -o -name '*.inc' -o -name '*.cmake' -o -name '*.pc' -o -path '*/include/*' -o -path '*/objects-*' -o -path '*/cache_keys/*' -o -path '*/patches/*' -o -perm +111 -o -path '*/src/wallet_engine/*' -o -path '*/tlottie/*' -o -path '*/wallet-engine/*' ')' -type f ')' -o -empty ')' -delete
 
       - name: Save Libraries cache.
         if: steps.cache-libs.outputs.cache-hit != 'true'

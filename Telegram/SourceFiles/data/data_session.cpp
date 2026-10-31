@@ -374,6 +374,11 @@ Session::Session(not_null<Main::Session*> session)
 		notifyUnreadBadgeChanged();
 	}, _lifetime);
 
+	_chatsFilters->changed(
+	) | rpl::on_next([=] {
+		refreshNoFolderChatLists();
+	}, _lifetime);
+
 	const auto &unreadOnTop = base::options::lookup<bool>(
 		Dialogs::kOptionDialogsUnreadOnTop);
 	_dialogsUnreadOnTop = unreadOnTop.value();
@@ -3018,6 +3023,10 @@ void Session::reorderTwoPinnedChats(
 		FilterId filterId,
 		Dialogs::Key key1,
 		Dialogs::Key key2) {
+	if (IsNoFolderFilterId(filterId)) {
+		// Reordered in a list without folder chats, it's the main order.
+		filterId = FilterId();
+	}
 	Expects(key1.entry()->folderKnown() && key2.entry()->folderKnown());
 	Expects(filterId || (key1.entry()->folder() == key2.entry()->folder()));
 
@@ -5679,6 +5688,7 @@ void Session::refreshChatListEntry(Dialogs::Key key) {
 		_chatListEntryRefreshes.fire(std::move(event));
 	}
 	if (!history) {
+		refreshNoFolderChatListEntry(key);
 		return;
 	}
 	for (const auto &filter : _chatsFilters->list()) {
@@ -5703,6 +5713,7 @@ void Session::refreshChatListEntry(Dialogs::Key key) {
 			_chatListEntryRefreshes.fire(std::move(event));
 		}
 	}
+	refreshNoFolderChatListEntry(key);
 
 	if (creating) {
 		if (const auto from = history->peer->migrateFrom()) {
@@ -5720,6 +5731,77 @@ void Session::refreshChatListEntry(Dialogs::Key key) {
 		//		broadcast->updateFull();
 		//	}
 		//}
+	}
+}
+
+void Session::refreshNoFolderChatListEntry(Dialogs::Key key) {
+	if (!Data::HideFolderChats()) {
+		return;
+	}
+	const auto entry = key.entry();
+	const auto history = entry->asHistory();
+	if (!history && !entry->asFolder()) {
+		return;
+	}
+	const auto mainList = chatsListFor(entry);
+	const auto folder = entry->folder();
+	const auto id = (mainList.get() == &_chatsList)
+		? kNoFolderMainFilterId
+		: (folder && mainList == folder->chatsList())
+		? kNoFolderArchiveFilterId
+		: FilterId();
+	const auto inFilter = history && ranges::any_of(
+		_chatsFilters->list(),
+		[&](const Data::ChatFilter &filter) {
+			return filter.id() && entry->inChatList(filter.id());
+		});
+	const auto shown = id && entry->inChatList() && !inFilter;
+	const auto ids = { kNoFolderMainFilterId, kNoFolderArchiveFilterId };
+	auto archiveChanged = false;
+	for (const auto listId : ids) {
+		const auto list = chatsFilters().chatsList(listId);
+		auto event = ChatListEntryRefresh{ .key = key, .filterId = listId };
+		if (shown && listId == id) {
+			event.existenceChanged = !entry->inChatList(listId);
+			if (event.existenceChanged) {
+				entry->addToChatList(listId, list);
+			} else {
+				event.moved = entry->adjustByPosInChatList(listId, list);
+			}
+		} else if (entry->inChatList(listId)) {
+			entry->removeFromChatList(listId, list);
+			event.existenceChanged = true;
+		}
+		if (event.existenceChanged && listId == kNoFolderArchiveFilterId) {
+			archiveChanged = true;
+		}
+		if (event) {
+			_chatListEntryRefreshes.fire(std::move(event));
+		}
+	}
+	if (archiveChanged) {
+		if (const auto archive = folderLoaded(Data::Folder::kId)) {
+			archive->noFolderListChanged();
+		}
+	}
+}
+
+void Session::refreshNoFolderChatLists() {
+	if (!Data::HideFolderChats()) {
+		return;
+	}
+	auto entries = std::vector<not_null<Dialogs::Entry*>>();
+	const auto collect = [&](not_null<Dialogs::MainList*> list) {
+		for (const auto &row : list->indexed()->all()) {
+			entries.push_back(row->entry());
+		}
+	};
+	collect(&_chatsList);
+	if (const auto folder = folderLoaded(Data::Folder::kId)) {
+		collect(folder->chatsList());
+	}
+	for (const auto &entry : entries) {
+		refreshNoFolderChatListEntry(entry);
 	}
 }
 
@@ -5751,6 +5833,20 @@ void Session::removeChatListEntry(Dialogs::Key key) {
 	for (const auto &filter : _chatsFilters->list()) {
 		const auto id = filter.id();
 		if (id && entry->inChatList(id)) {
+			entry->removeFromChatList(id, chatsFilters().chatsList(id));
+			_chatListEntryRefreshes.fire(ChatListEntryRefresh{
+				.key = key,
+				.filterId = id,
+				.existenceChanged = true
+			});
+		}
+	}
+	const auto noFolderIds = {
+		kNoFolderMainFilterId,
+		kNoFolderArchiveFilterId,
+	};
+	for (const auto id : noFolderIds) {
+		if (entry->inChatList(id)) {
 			entry->removeFromChatList(id, chatsFilters().chatsList(id));
 			_chatListEntryRefreshes.fire(ChatListEntryRefresh{
 				.key = key,

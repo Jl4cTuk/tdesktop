@@ -312,6 +312,7 @@ InnerWidget::InnerWidget(
 , _freezeTimer([=] { _shownList->unfreeze(); update(); }) {
 	setAttribute(Qt::WA_OpaquePaintEvent, true);
 	setAccessibleName(tr::lng_recent_chats(tr::now));
+	refreshShownList();
 
 	_communityViewable.setRepaint([=] { update(); });
 
@@ -422,7 +423,9 @@ InnerWidget::InnerWidget(
 				return false;
 			}
 			if (event.existenceChanged) {
-				if (event.key.entry()->inChatList(_filterId)) {
+				const auto noFolderId = noFolderListId();
+				if (event.key.entry()->inChatList(
+						noFolderId ? noFolderId : _filterId)) {
 					_waitingAllChatListEntryRefreshesForTags = true;
 					return true;
 				}
@@ -3340,7 +3343,8 @@ void InnerWidget::handleChatListEntryRefreshes() {
 	using Event = Data::Session::ChatListEntryRefresh;
 	session().data().chatListEntryRefreshes(
 	) | rpl::filter([=](const Event &event) {
-		if (event.filterId != _filterId) {
+		const auto noFolderId = noFolderListId();
+		if (event.filterId != (noFolderId ? noFolderId : _filterId)) {
 			return false;
 		} else if (const auto topic = event.key.topic()) {
 			return (topic->forum() == _openedForum);
@@ -3389,7 +3393,7 @@ void InnerWidget::handleChatListEntryRefreshes() {
 		}
 
 		if (event.existenceChanged) {
-			if (!entry->inChatList()) {
+			if (!entry->inChatList(noFolderListId())) {
 				if (key == _menuRow.key && _menu) {
 					InvokeQueued(this, [=] { _menu = nullptr; });
 				}
@@ -3841,7 +3845,19 @@ void InnerWidget::updateSelectedRow(Key key) {
 	}
 }
 
+FilterId InnerWidget::noFolderListId() const {
+	if (!Data::HideFolderChats()
+		|| _savedSublists
+		|| _openedForum
+		|| _openedCommunity
+		|| _filterId) {
+		return FilterId();
+	}
+	return _openedFolder ? kNoFolderArchiveFilterId : kNoFolderMainFilterId;
+}
+
 void InnerWidget::refreshShownList() {
+	const auto noFolderId = noFolderListId();
 	const auto list = _savedSublists
 		? _savedSublists->chatsList()->indexed()
 		: _openedForum
@@ -3850,6 +3866,8 @@ void InnerWidget::refreshShownList() {
 		? _openedCommunity->chatsList()->indexed()
 		: _filterId
 		? session().data().chatsFilters().chatsList(_filterId)->indexed()
+		: noFolderId
+		? session().data().chatsFilters().chatsList(noFolderId)->indexed()
 		: session().data().chatsList(_openedFolder)->indexed();
 	if (_shownList != list) {
 		_shownList->unfreeze();

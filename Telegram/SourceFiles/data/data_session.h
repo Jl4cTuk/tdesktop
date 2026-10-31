@@ -949,6 +949,8 @@ public:
 	};
 	void refreshChatListEntry(Dialogs::Key key);
 	void removeChatListEntry(Dialogs::Key key);
+	void refreshNoFolderChatListEntry(Dialogs::Key key);
+	void refreshNoFolderChatLists();
 	void refreshChatListUnreadOnTop();
 	[[nodiscard]] bool dialogsUnreadOnTop() const {
 		return _dialogsUnreadOnTop;

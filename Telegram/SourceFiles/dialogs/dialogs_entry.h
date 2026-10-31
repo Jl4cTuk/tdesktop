@@ -127,7 +127,7 @@ public:
 	}
 	void cachePinnedIndex(FilterId filterId, int index);
 	[[nodiscard]] uint64 sortKeyInChatList(FilterId filterId) const {
-		return filterId
+		return (filterId && !IsNoFolderFilterId(filterId))
 			? computeSortPosition(filterId)
 			: _sortKeyInChatList;
 	}

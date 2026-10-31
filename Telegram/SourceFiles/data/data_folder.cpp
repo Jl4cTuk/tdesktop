@@ -8,6 +8,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "data/data_folder.h"
 
 #include "data/data_session.h"
+#include "data/data_chat_filters.h"
 #include "data/data_channel.h"
 #include "data/data_histories.h"
 #include "data/data_changes.h"
@@ -130,8 +131,12 @@ Folder::Folder(not_null<Session*> owner, FolderId id)
 	}, _lifetime);
 
 	_chatsList.setAllAreMuted(true);
+	if (HideFolderChats()) {
+		owner->chatsFilters().chatsList(
+			kNoFolderArchiveFilterId)->setAllAreMuted(true);
+	}
 
-	_chatsList.unreadStateChanges(
+	shownChatsList()->unreadStateChanges(
 	) | rpl::filter([=] {
 		return inChatList();
 	}) | rpl::on_next([=](const Dialogs::UnreadState &old) {
@@ -182,6 +187,17 @@ void Folder::oneListMessageChanged(HistoryItem *from, HistoryItem *to) {
 	}
 }
 
+void Folder::noFolderListChanged() {
+	reorderLastHistories();
+}
+
+not_null<const Dialogs::MainList*> Folder::shownChatsList() const {
+	if (HideFolderChats()) {
+		return owner().chatsFilters().chatsList(kNoFolderArchiveFilterId);
+	}
+	return &_chatsList;
+}
+
 void Folder::reorderLastHistories() {
 	// We want first kShowChatNamesCount histories, by last message date.
 	const auto pred = [](not_null<History*> a, not_null<History*> b) {
@@ -194,7 +210,7 @@ void Folder::reorderLastHistories() {
 	_lastHistories.clear();
 	_lastHistories.reserve(kShowChatNamesCount + 1);
 	auto &&histories = ranges::views::all(
-		*_chatsList.indexed()
+		*shownChatsList()->indexed()
 	) | ranges::views::transform([](not_null<Dialogs::Row*> row) {
 		return row->history();
 	}) | ranges::views::filter([](History *history) {
@@ -379,7 +395,7 @@ bool Folder::shouldBeInChatList() const {
 }
 
 Dialogs::UnreadState Folder::chatListUnreadState() const {
-	return _chatsList.unreadState();
+	return shownChatsList()->unreadState();
 }
 
 Dialogs::BadgesState Folder::chatListBadgesState() const {

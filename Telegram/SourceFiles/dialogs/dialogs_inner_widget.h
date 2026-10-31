@@ -466,6 +466,7 @@ private:
 	void fillSupportSearchMenu(not_null<Ui::PopupMenu*> menu);
 
 	void refreshShownList();
+	[[nodiscard]] FilterId noFolderListId() const;
 	void rebuildCommunitySections();
 	void updateCommunityRequestableGeometry();
 	void setCommunityPressed(int pressed);

@@ -34,6 +34,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "core/sandbox.h"
 #include "chat_helpers/tabbed_panel.h"
 #include "dialogs/dialogs_entry.h"
+#include "data/data_chat_filters.h"
 #include "dialogs/dialogs_widget.h"
 #include "dialogs/ui/dialogs_layout.h"
 #include "ffmpeg/ffmpeg_utility.h"
@@ -387,6 +388,7 @@ void SetupExperimental(
 			u"Chats"_q,
 			{
 				Dialogs::kOptionForumHideChatsList,
+				Data::kOptionHideFolderChats,
 				Dialogs::kOptionDialogsUnreadOnTop,
 				Dialogs::Ui::kOptionDialogsMuteIcon,
 				kOptionUseNewChatView,

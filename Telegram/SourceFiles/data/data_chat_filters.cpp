@@ -24,9 +24,18 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "main/main_session.h"
 #include "main/main_app_config.h"
 #include "apiwrap.h"
+#include "base/options.h"
 
 namespace Data {
 namespace {
+
+base::options::toggle HideFolderChatsOption({
+	.id = kOptionHideFolderChats,
+	.name = "Hide folder chats from All chats",
+	.description = "Chats that belong to a chat folder are shown only"
+		" in their folders, not in All chats or in the Archive.",
+	.restartRequired = true,
+});
 
 constexpr auto kRefreshSuggestedTimeout = 7200 * crl::time(1000);
 constexpr auto kLoadExceptionsAfter = 100;
@@ -39,6 +48,12 @@ constexpr auto kLoadExceptionsPerRequest = 100;
 }
 
 } // namespace
+
+const char kOptionHideFolderChats[] = "hide-folder-chats";
+
+bool HideFolderChats() {
+	return HideFolderChatsOption.value();
+}
 
 TextWithEntities ForceCustomEmojiStatic(TextWithEntities text) {
 	for (auto &entity : text.entities) {

@@ -36,6 +36,9 @@ struct ChatFilterTitle {
 
 [[nodiscard]] TextWithEntities ForceCustomEmojiStatic(TextWithEntities text);
 
+extern const char kOptionHideFolderChats[];
+[[nodiscard]] bool HideFolderChats();
+
 class ChatFilter final {
 public:
 	enum class Flag : ushort {

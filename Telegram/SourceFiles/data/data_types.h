@@ -111,6 +111,17 @@ class Folder;
 using FolderId = int32;
 using FilterId = int32;
 
+// Lists of the main chats list and of the archive without the chats that
+// belong to any chat folder, shown instead of them with the "Hide folder
+// chats from All chats" experimental option. They are kept like the chat
+// folder lists, but have no folder of their own.
+inline constexpr auto kNoFolderMainFilterId = FilterId(-2);
+inline constexpr auto kNoFolderArchiveFilterId = FilterId(-3);
+
+[[nodiscard]] inline constexpr bool IsNoFolderFilterId(FilterId id) {
+	return (id == kNoFolderMainFilterId) || (id == kNoFolderArchiveFilterId);
+}
+
 using MessageIdsList = std::vector<FullMsgId>;
 
 [[nodiscard]] PeerId PeerFromMessage(const MTPmessage &message);

@@ -34,6 +34,7 @@ public:
 	void registerOne(not_null<History*> history);
 	void unregisterOne(not_null<History*> history);
 	void oneListMessageChanged(HistoryItem *from, HistoryItem *to);
+	void noFolderListChanged();
 
 	void clearChatsList();
 	[[nodiscard]] not_null<Dialogs::MainList*> chatsList();
@@ -83,6 +84,10 @@ private:
 	void indexNameParts();
 
 	void reorderLastHistories();
+
+	// The archive without chats from chat folders when they are hidden,
+	// it gives the archive row its chat names and unread badge.
+	[[nodiscard]] not_null<const Dialogs::MainList*> shownChatsList() const;
 
 	void paintUserpic(
 		Painter &p,

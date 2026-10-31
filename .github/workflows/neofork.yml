@@ -1,8 +1,8 @@
 name: Neofork.
 
-# Release builds of the patched client for Windows and macOS.
+# Release builds of the patched client for Windows, macOS and Linux.
 #
-# Based on upstream win.yml and mac.yml, with these differences:
+# Based on upstream win.yml, mac.yml and linux.yml, with these differences:
 # - plain GitHub-hosted runners (upstream uses paid depot runners on tags);
 # - Release configuration;
 # - auto-update and crash reports disabled, so the official updater never
@@ -10,7 +10,10 @@ name: Neofork.
 # - API credentials from the TDESKTOP_API_ID / TDESKTOP_API_HASH repository
 #   secrets, falling back to the open credentials Linux distributions use
 #   (upstream CI uses the test ones, which cannot log in to production);
-# - a pushed tag publishes both builds as a GitHub release.
+# - library caches are saved right after the libraries are built, so a
+#   failing Telegram build doesn't lose hours of library builds; the Linux
+#   build environment image is cached in the GitHub container registry;
+# - a pushed tag publishes the builds as a GitHub release.
 
 on:
   push:
@@ -93,14 +96,16 @@ jobs:
           nuget sources Add -Source https://api.nuget.org/v3/index.json & exit 0
 
       - name: ThirdParty cache.
-        uses: actions/cache@v6
+        id: cache-third-party
+        uses: actions/cache/restore@v6
         with:
           path: ${{ env.TBUILD }}\ThirdParty
           key: ${{ runner.OS }}-${{ runner.arch }}-third-party-${{ env.CACHE_KEY }}
           restore-keys: ${{ runner.OS }}-${{ runner.arch }}-third-party-
 
       - name: Libraries cache.
-        uses: actions/cache@v6
+        id: cache-libs
+        uses: actions/cache/restore@v6
         with:
           path: |
             ${{ env.LibrariesPath }}\*
@@ -112,7 +117,8 @@ jobs:
           restore-keys: ${{ runner.OS }}-x64-release-libs-
 
       - name: Qt cache.
-        uses: actions/cache@v6
+        id: cache-qt
+        uses: actions/cache/restore@v6
         with:
           path: |
             ${{ env.LibrariesPath }}\[qQ]t[_-]*
@@ -128,6 +134,34 @@ jobs:
       - name: Free up some disk space.
         shell: bash
         run: find $LibrariesPath '(' '(' ! '(' -name '*.lib' -o -name '*.a' -o -name '*.exe' -o -name '*.h' -o -name '*.hpp' -o -name '*.inc' -o -name '*.cmake' -o -name '*.pc' -o -path '*/include/*' -o -path '*/objects-*' -o -path '*/cache_keys/*' -o -path '*/patches/*' -o -path '*/nv-codec-headers/*' ')' -type f ')' -o -empty ')' -delete
+
+      - name: Save ThirdParty cache.
+        if: steps.cache-third-party.outputs.cache-hit != 'true'
+        uses: actions/cache/save@v6
+        with:
+          path: ${{ env.TBUILD }}\ThirdParty
+          key: ${{ steps.cache-third-party.outputs.cache-primary-key }}
+
+      - name: Save Libraries cache.
+        if: steps.cache-libs.outputs.cache-hit != 'true'
+        uses: actions/cache/save@v6
+        with:
+          path: |
+            ${{ env.LibrariesPath }}\*
+            !${{ env.LibrariesPath }}\cache_keys
+            !${{ env.LibrariesPath }}\[qQ]t[_-]*
+            ${{ env.LibrariesPath }}\cache_keys\*
+            !${{ env.LibrariesPath }}\cache_keys\[qQ]t[_-]*
+          key: ${{ steps.cache-libs.outputs.cache-primary-key }}
+
+      - name: Save Qt cache.
+        if: steps.cache-qt.outputs.cache-hit != 'true'
+        uses: actions/cache/save@v6
+        with:
+          path: |
+            ${{ env.LibrariesPath }}\[qQ]t[_-]*
+            ${{ env.LibrariesPath }}\cache_keys\[qQ]t[_-]*
+          key: ${{ steps.cache-qt.outputs.cache-primary-key }}
 
       - name: API credentials.
         shell: bash
@@ -196,7 +230,8 @@ jobs:
           sudo xcode-select -s /Applications/Xcode.app/Contents/Developer
 
       - name: Libraries cache.
-        uses: actions/cache@v6
+        id: cache-libs
+        uses: actions/cache/restore@v6
         with:
           path: |
             Libraries
@@ -211,6 +246,15 @@ jobs:
 
       - name: Free up some disk space.
         run: find Libraries '(' '(' ! '(' -name '*.a' -o -name '*.h' -o -name '*.hpp' -o -name '*.inc' -o -name '*.cmake' -o -name '*.pc' -o -path '*/include/*' -o -path '*/objects-*' -o -path '*/cache_keys/*' -o -path '*/patches/*' -o -perm +111 ')' -type f ')' -o -empty ')' -delete
+
+      - name: Save Libraries cache.
+        if: steps.cache-libs.outputs.cache-hit != 'true'
+        uses: actions/cache/save@v6
+        with:
+          path: |
+            Libraries
+            ThirdParty
+          key: ${{ steps.cache-libs.outputs.cache-primary-key }}
 
       - name: Telegram Desktop build.
         env:
@@ -245,10 +289,91 @@ jobs:
           path: ${{ env.REPO_NAME }}/out/Release/artifact/
           retention-days: 14
 
+  linux:
+    name: Linux
+    runs-on: ubuntu-latest
+    timeout-minutes: 360
+    permissions:
+      contents: read
+      packages: write
+
+    steps:
+      - name: Clone.
+        uses: actions/checkout@v7
+        with:
+          submodules: recursive
+
+      - name: First set up.
+        run: |
+          echo "IMAGE=ghcr.io/${GITHUB_REPOSITORY_OWNER,,}/tdesktop-centos-env" >> $GITHUB_ENV
+          curl -sSL https://install.python-poetry.org | python3 -
+          cd Telegram/build/docker/centos_env
+          poetry install
+          # Release libraries only, without link time optimization.
+          DOCKERFILE=$(DEBUG= LTO= poetry run gen_dockerfile)
+          echo "$DOCKERFILE" > Dockerfile
+          rm -rf __pycache__
+
+      - name: Free up some disk space.
+        uses: jlumbroso/free-disk-space@ceedf095f4ec1a097402bc6bd80831f2e1a6fde6
+        with:
+          tool-cache: true
+
+      - name: Set up Docker Buildx.
+        uses: docker/setup-buildx-action@v4
+
+      - name: Log in to the container registry.
+        uses: docker/login-action@v4
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ github.token }}
+
+      # The layer cache is pushed to the registry as soon as the image is
+      # built, so it survives a failing Telegram build.
+      - name: Libraries.
+        uses: docker/build-push-action@v7
+        with:
+          context: Telegram/build/docker/centos_env
+          load: true
+          tags: tdesktop:centos_env
+          cache-from: type=registry,ref=${{ env.IMAGE }}:cache
+          cache-to: type=registry,ref=${{ env.IMAGE }}:cache,mode=max
+
+      - name: Telegram Desktop build.
+        env:
+          SECRET_API_ID: ${{ secrets.TDESKTOP_API_ID }}
+          SECRET_API_HASH: ${{ secrets.TDESKTOP_API_HASH }}
+        run: |
+          docker run --rm \
+          -u $(id -u) \
+          -v $PWD:/usr/src/tdesktop \
+          -e CONFIG=Release \
+          tdesktop:centos_env \
+          /usr/src/tdesktop/Telegram/build/docker/centos_env/build.sh \
+          -D TDESKTOP_API_ID=${SECRET_API_ID:-$OPEN_API_ID} \
+          -D TDESKTOP_API_HASH=${SECRET_API_HASH:-$OPEN_API_HASH} \
+          -D CMAKE_CONFIGURATION_TYPES=Release \
+          -D DESKTOP_APP_DISABLE_AUTOUPDATE=ON \
+          -D DESKTOP_APP_DISABLE_CRASH_REPORTS=ON
+
+      # A tarball keeps the executable bit.
+      - name: Pack artifact.
+        run: |
+          mkdir artifact
+          tar -C out/Release -czf artifact/Telegram-linux-x64.tar.gz Telegram
+
+      - uses: actions/upload-artifact@v7
+        name: Upload artifact.
+        with:
+          name: Telegram-linux-x64
+          path: artifact/
+          retention-days: 14
+
   release:
     name: Release
     if: startsWith(github.ref, 'refs/tags/')
-    needs: [windows, macos]
+    needs: [windows, macos, linux]
     runs-on: ubuntu-latest
     permissions:
       contents: write
@@ -269,4 +394,5 @@ jobs:
             --title "$GITHUB_REF_NAME" \
             --notes "Telegram Desktop with the Killergram Neofork tweaks." \
             Telegram-windows-x64.zip \
-            Telegram-macos/Telegram-macos.zip
+            Telegram-macos/Telegram-macos.zip \
+            Telegram-linux-x64/Telegram-linux-x64.tar.gz

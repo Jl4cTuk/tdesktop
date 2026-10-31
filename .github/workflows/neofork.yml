@@ -1,0 +1,272 @@
+name: Neofork.
+
+# Release builds of the patched client for Windows and macOS.
+#
+# Based on upstream win.yml and mac.yml, with these differences:
+# - plain GitHub-hosted runners (upstream uses paid depot runners on tags);
+# - Release configuration;
+# - auto-update and crash reports disabled, so the official updater never
+#   replaces this build and its crashes are not sent to Telegram;
+# - API credentials from the TDESKTOP_API_ID / TDESKTOP_API_HASH repository
+#   secrets, falling back to the open credentials Linux distributions use
+#   (upstream CI uses the test ones, which cannot log in to production);
+# - a pushed tag publishes both builds as a GitHub release.
+
+on:
+  push:
+    branches:
+      - neofork
+    tags:
+      - 'v*'
+    paths-ignore:
+      - 'docs/**'
+      - '**.md'
+      - 'changelog.txt'
+      - 'LEGAL'
+      - 'LICENSE'
+      - 'snap/**'
+  workflow_dispatch:
+
+env:
+  OPEN_API_ID: "611335"
+  OPEN_API_HASH: "d524b414d21f4d37f08684c1df41ac9c"
+
+jobs:
+
+  windows:
+    name: Windows
+    runs-on: windows-latest
+    timeout-minutes: 360
+
+    env:
+      PREPARE_PATH: "Telegram/build/prepare/prepare.py"
+
+    defaults:
+      run:
+        shell: cmd
+
+    steps:
+      - name: Prepare directories.
+        run: |
+          mkdir %userprofile%\TBuild\Libraries
+          mklink /d %GITHUB_WORKSPACE%\TBuild %userprofile%\TBuild
+          echo TBUILD=%GITHUB_WORKSPACE%\TBuild>>%GITHUB_ENV%
+          echo LibrariesPath=%GITHUB_WORKSPACE%\TBuild\Libraries\win64>>%GITHUB_ENV%
+
+      - name: Get repository name.
+        shell: bash
+        run: echo "REPO_NAME=${GITHUB_REPOSITORY##*/}" >> $GITHUB_ENV
+
+      - name: Clone.
+        uses: actions/checkout@v7
+        with:
+          submodules: recursive
+          path: ${{ env.TBUILD }}\${{ env.REPO_NAME }}
+
+      - name: First set up.
+        shell: bash
+        run: |
+          DOCPATH=$TBUILD/$REPO_NAME/docs/building-win.md
+          SDK="$(grep "SDK version" $DOCPATH | sed -r 's/.*\*\*(.*)\*\* SDK version.*/\1/')"
+          echo "SDK=$SDK" >> $GITHUB_ENV
+
+          sed -i '/CMAKE_${lang}_FLAGS_DEBUG_INIT/s/${_Zi}//' "$PROGRAMFILES"/CMake/share/cmake*/Modules/Platform/Windows-MSVC.cmake
+
+          echo "$(sha256sum $TBUILD/$REPO_NAME/$PREPARE_PATH | awk '{ print $1 }')" >> CACHE_KEY.txt
+          echo "$SDK" >> CACHE_KEY.txt
+          echo "CACHE_KEY=$(sha256sum CACHE_KEY.txt | awk '{ print $1 }')" >> $GITHUB_ENV
+
+          echo "Configurate git for cherry-picks."
+          git config --global user.email "you@example.com"
+          git config --global user.name "Sample"
+
+      - uses: Eden-CI/msvc-dev-cmd@master
+        name: Native Tools Command Prompt.
+        with:
+          arch: x64
+          sdk: ${{ env.SDK }}
+          toolset: '14.44'
+
+      - name: NuGet sources.
+        run: |
+          nuget sources Disable -Name "Microsoft Visual Studio Offline Packages"
+          nuget sources Add -Source https://api.nuget.org/v3/index.json & exit 0
+
+      - name: ThirdParty cache.
+        uses: actions/cache@v6
+        with:
+          path: ${{ env.TBUILD }}\ThirdParty
+          key: ${{ runner.OS }}-${{ runner.arch }}-third-party-${{ env.CACHE_KEY }}
+          restore-keys: ${{ runner.OS }}-${{ runner.arch }}-third-party-
+
+      - name: Libraries cache.
+        uses: actions/cache@v6
+        with:
+          path: |
+            ${{ env.LibrariesPath }}\*
+            !${{ env.LibrariesPath }}\cache_keys
+            !${{ env.LibrariesPath }}\[qQ]t[_-]*
+            ${{ env.LibrariesPath }}\cache_keys\*
+            !${{ env.LibrariesPath }}\cache_keys\[qQ]t[_-]*
+          key: ${{ runner.OS }}-x64-release-libs-${{ env.CACHE_KEY }}
+          restore-keys: ${{ runner.OS }}-x64-release-libs-
+
+      - name: Qt cache.
+        uses: actions/cache@v6
+        with:
+          path: |
+            ${{ env.LibrariesPath }}\[qQ]t[_-]*
+            ${{ env.LibrariesPath }}\cache_keys\[qQ]t[_-]*
+          key: ${{ runner.OS }}-x64-release-qt-${{ env.CACHE_KEY }}
+          restore-keys: ${{ runner.OS }}-x64-release-qt-
+
+      # Without skip-release: the Release build links the Release libraries.
+      - name: Libraries.
+        run: |
+          %TBUILD%\%REPO_NAME%\Telegram\build\prepare\win.bat silent
+
+      - name: Free up some disk space.
+        shell: bash
+        run: find $LibrariesPath '(' '(' ! '(' -name '*.lib' -o -name '*.a' -o -name '*.exe' -o -name '*.h' -o -name '*.hpp' -o -name '*.inc' -o -name '*.cmake' -o -name '*.pc' -o -path '*/include/*' -o -path '*/objects-*' -o -path '*/cache_keys/*' -o -path '*/patches/*' -o -path '*/nv-codec-headers/*' ')' -type f ')' -o -empty ')' -delete
+
+      - name: API credentials.
+        shell: bash
+        env:
+          SECRET_API_ID: ${{ secrets.TDESKTOP_API_ID }}
+          SECRET_API_HASH: ${{ secrets.TDESKTOP_API_HASH }}
+        run: |
+          echo "API_ID=${SECRET_API_ID:-$OPEN_API_ID}" >> $GITHUB_ENV
+          echo "API_HASH=${SECRET_API_HASH:-$OPEN_API_HASH}" >> $GITHUB_ENV
+
+      - name: Telegram Desktop build.
+        run: |
+          cd %TBUILD%\%REPO_NAME%\Telegram
+
+          call configure.bat x64 ^
+          -D TDESKTOP_API_ID=%API_ID% ^
+          -D TDESKTOP_API_HASH=%API_HASH% ^
+          -D CMAKE_CONFIGURATION_TYPES=Release ^
+          -D DESKTOP_APP_DISABLE_AUTOUPDATE=ON ^
+          -D DESKTOP_APP_DISABLE_CRASH_REPORTS=ON ^
+          -D CMAKE_MSVC_DEBUG_INFORMATION_FORMAT=
+
+          cmake --build ..\out --config Release --parallel
+
+      - name: Move artifact.
+        run: |
+          mkdir artifact
+          move %TBUILD%\%REPO_NAME%\out\Release\Telegram.exe artifact\
+
+      - uses: actions/upload-artifact@v7
+        name: Upload artifact.
+        with:
+          name: Telegram-windows-x64
+          path: artifact\
+          retention-days: 14
+
+  macos:
+    name: MacOS
+    runs-on: macos-latest
+    timeout-minutes: 360
+
+    env:
+      PREPARE_PATH: "Telegram/build/prepare/prepare.py"
+
+    steps:
+      - name: Get repository name.
+        run: echo "REPO_NAME=${GITHUB_REPOSITORY##*/}" >> $GITHUB_ENV
+
+      - name: Clone.
+        uses: actions/checkout@v7
+        with:
+          submodules: recursive
+          path: ${{ env.REPO_NAME }}
+
+      - name: First set up.
+        run: |
+          sudo chown -R `whoami`:admin /usr/local/share
+
+          brew update
+          brew upgrade || true
+          brew install automake libtool meson nasm ninja pkg-config
+
+          # Disable spotlight.
+          sudo mdutil -a -i off
+
+          sudo xcode-select -s /Applications/Xcode.app/Contents/Developer
+
+      - name: Libraries cache.
+        uses: actions/cache@v6
+        with:
+          path: |
+            Libraries
+            ThirdParty
+          key: ${{ runner.OS }}-release-libs-${{ hashFiles(format('{0}/{1}', env.REPO_NAME, env.PREPARE_PATH)) }}
+          restore-keys: ${{ runner.OS }}-release-libs-
+
+      # Without skip-release: it would build Qt and crashpad in Debug only.
+      - name: Libraries.
+        run: |
+          ./$REPO_NAME/Telegram/build/prepare/mac.sh silent
+
+      - name: Free up some disk space.
+        run: find Libraries '(' '(' ! '(' -name '*.a' -o -name '*.h' -o -name '*.hpp' -o -name '*.inc' -o -name '*.cmake' -o -name '*.pc' -o -path '*/include/*' -o -path '*/objects-*' -o -path '*/cache_keys/*' -o -path '*/patches/*' -o -perm +111 ')' -type f ')' -o -empty ')' -delete
+
+      - name: Telegram Desktop build.
+        env:
+          SECRET_API_ID: ${{ secrets.TDESKTOP_API_ID }}
+          SECRET_API_HASH: ${{ secrets.TDESKTOP_API_HASH }}
+        run: |
+          cd $REPO_NAME/Telegram
+
+          ./configure.sh \
+          -D TDESKTOP_API_ID=${SECRET_API_ID:-$OPEN_API_ID} \
+          -D TDESKTOP_API_HASH=${SECRET_API_HASH:-$OPEN_API_HASH} \
+          -D CMAKE_CONFIGURATION_TYPES=Release \
+          -D CMAKE_XCODE_ATTRIBUTE_CODE_SIGNING_ALLOWED=NO \
+          -D DESKTOP_APP_DISABLE_AUTOUPDATE=ON \
+          -D DESKTOP_APP_DISABLE_CRASH_REPORTS=ON
+
+          cmake --build ../out --config Release --parallel
+
+      # Ad-hoc signature: Apple Silicon refuses to run unsigned code. The zip
+      # is made with ditto so the bundle keeps its symlinks and permissions.
+      - name: Pack artifact.
+        run: |
+          cd $REPO_NAME/out/Release
+          codesign --force --deep --sign - Telegram.app
+          mkdir artifact
+          ditto -c -k --keepParent Telegram.app artifact/Telegram-macos.zip
+
+      - uses: actions/upload-artifact@v7
+        name: Upload artifact.
+        with:
+          name: Telegram-macos
+          path: ${{ env.REPO_NAME }}/out/Release/artifact/
+          retention-days: 14
+
+  release:
+    name: Release
+    if: startsWith(github.ref, 'refs/tags/')
+    needs: [windows, macos]
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+
+    steps:
+      - uses: actions/download-artifact@v7
+        with:
+          path: artifacts
+
+      - name: Publish.
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          cd artifacts
+          (cd Telegram-windows-x64 && zip -9 ../Telegram-windows-x64.zip Telegram.exe)
+          gh release create "$GITHUB_REF_NAME" \
+            --repo "$GITHUB_REPOSITORY" \
+            --title "$GITHUB_REF_NAME" \
+            --notes "Telegram Desktop with the Killergram Neofork tweaks." \
+            Telegram-windows-x64.zip \
+            Telegram-macos/Telegram-macos.zip

@@ -49,6 +49,33 @@ jobs:
         shell: cmd
 
     steps:
+      # Release and Debug libraries together don't fit into the free space
+      # of the runner, remove the preinstalled software the build never uses.
+      - name: Free up disk space for the libraries.
+        shell: pwsh
+        run: |
+          Get-PSDrive C, D | Format-Table Name, @{n='FreeGB';e={[int]($_.Free/1GB)}}
+          $dirs = @(
+            'C:\Android',
+            'C:\ghcup',
+            'C:\Strawberry',
+            'C:\Program Files\Microsoft SQL Server',
+            'C:\Program Files\MongoDB',
+            'C:\Program Files\PostgreSQL',
+            'C:\Program Files\Azure Cosmos DB Emulator',
+            'C:\hostedtoolcache\windows\CodeQL',
+            'C:\hostedtoolcache\windows\go',
+            'C:\hostedtoolcache\windows\Ruby',
+            'C:\hostedtoolcache\windows\PyPy',
+            'C:\hostedtoolcache\windows\Java_Temurin-Hotspot_jdk'
+          )
+          foreach ($dir in $dirs) {
+            if (Test-Path $dir) {
+              cmd /c rmdir /s /q "$dir" 2>$null
+            }
+          }
+          Get-PSDrive C, D | Format-Table Name, @{n='FreeGB';e={[int]($_.Free/1GB)}}
+
       - name: Prepare directories.
         run: |
           mkdir %userprofile%\TBuild\Libraries
@@ -73,7 +100,8 @@ jobs:
           SDK="$(grep "SDK version" $DOCPATH | sed -r 's/.*\*\*(.*)\*\* SDK version.*/\1/')"
           echo "SDK=$SDK" >> $GITHUB_ENV
 
-          sed -i '/CMAKE_${lang}_FLAGS_DEBUG_INIT/s/${_Zi}//' "$PROGRAMFILES"/CMake/share/cmake*/Modules/Platform/Windows-MSVC.cmake
+          # No debug information in the libraries, it takes too much space.
+          sed -i '/CMAKE_${lang}_FLAGS_\(DEBUG\|RELWITHDEBINFO\)_INIT/s/${_Zi}//' "$PROGRAMFILES"/CMake/share/cmake*/Modules/Platform/Windows-MSVC.cmake
 
           echo "$(sha256sum $TBUILD/$REPO_NAME/$PREPARE_PATH | awk '{ print $1 }')" >> CACHE_KEY.txt
           echo "$SDK" >> CACHE_KEY.txt

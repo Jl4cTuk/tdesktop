@@ -10,6 +10,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "data/data_channel.h"
 #include "data/data_changes.h"
 #include "data/data_forum.h"
+#include "data/data_hidden_topics.h"
 #include "data/data_histories.h"
 #include "data/data_replies_list.h"
 #include "data/data_send_action.h"
@@ -736,6 +737,9 @@ int ForumTopic::fixedOnTopIndex() const {
 }
 
 bool ForumTopic::shouldBeInChatList() const {
+	if (IsTopicHidden(peer()->id, rootId())) {
+		return false;
+	}
 	return isPinnedDialog(FilterId())
 		|| !lastMessageKnown()
 		|| (lastMessage() != nullptr);

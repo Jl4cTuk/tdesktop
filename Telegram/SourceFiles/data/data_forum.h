@@ -95,6 +95,7 @@ public:
 	void enumerateTopics(Fn<void(not_null<ForumTopic*>)> action) const;
 
 	void listMessageChanged(HistoryItem *from, HistoryItem *to);
+	void hiddenTopicsChanged();
 	[[nodiscard]] int recentTopicsListVersion() const;
 	void recentTopicsInvalidate(not_null<ForumTopic*> topic);
 	[[nodiscard]] auto recentTopics() const

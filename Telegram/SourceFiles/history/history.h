@@ -569,6 +569,7 @@ private:
 	void applyStreamedDraftFinish(not_null<HistoryItem*> item);
 
 	friend class Data::SponsoredMessages;
+	friend class Data::Forum; // Hidden topics change the list message.
 	not_null<HistoryItem*> addNewInTheMiddle(
 		not_null<HistoryItem*> item,
 		int blockIndex,

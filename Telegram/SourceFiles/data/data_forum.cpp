@@ -15,6 +15,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "data/data_session.h"
 #include "data/data_forum_icons.h"
 #include "data/data_forum_topic.h"
+#include "data/data_hidden_topics.h"
 #include "data/data_replies_list.h"
 #include "data/data_user.h"
 #include "data/notify/data_notify_settings.h"
@@ -355,7 +356,17 @@ void Forum::updateUnreadCounts(
 void Forum::listMessageChanged(HistoryItem *from, HistoryItem *to) {
 	if (from || to) {
 		reorderLastTopics();
+		if (HiddenTopicsCount(peer()->id)) {
+			_history->refreshChatListMessage();
+		}
 	}
+}
+
+void Forum::hiddenTopicsChanged() {
+	reorderLastTopics();
+	_chatsListChanges.fire({});
+	_history->refreshChatListMessage();
+	_history->updateChatListEntry();
 }
 
 void Forum::applyReceivedTopics(
@@ -531,7 +542,9 @@ ForumTopic *Forum::applyTopicAdded(
 	raw->applyCreationDate(date);
 	raw->applyIsMy(my);
 	if (!creating(rootId)) {
-		raw->addToChatList(FilterId(), topicsList());
+		if (!IsTopicHidden(peer()->id, rootId)) {
+			raw->addToChatList(FilterId(), topicsList());
+		}
 		_chatsListChanges.fire({});
 		reorderLastTopics();
 	}

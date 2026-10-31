@@ -45,6 +45,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "data/data_folder.h"
 #include "data/data_forum.h"
 #include "data/data_forum_topic.h"
+#include "data/data_hidden_topics.h"
 #include "data/data_photo.h"
 #include "data/data_channel.h"
 #include "data/data_chat.h"
@@ -3229,6 +3230,18 @@ auto History::computeChatListMessageFromLast() const
 	// about migration in the chats list and display the last
 	// non-migration message from the original legacy group.
 	const auto last = lastMessage();
+	if (const auto forum = last ? peer->forum() : nullptr) {
+		const auto topic = last->topic();
+		if (topic && Data::IsTopicHidden(peer->id, topic->rootId())) {
+			// Show the last message of the most recent visible topic.
+			for (const auto &visible : forum->recentTopics()) {
+				if (const auto item = visible->chatListMessage()) {
+					return item;
+				}
+			}
+			return _lastMessage;
+		}
+	}
 	if (!last || !last->isGroupMigrate()) {
 		return _lastMessage;
 	}

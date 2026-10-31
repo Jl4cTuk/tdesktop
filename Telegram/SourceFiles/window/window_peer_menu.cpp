@@ -116,6 +116,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "data/data_user.h"
 #include "data/data_saved_messages.h"
 #include "data/data_saved_sublist.h"
+#include "data/data_hidden_topics.h"
 #include "data/data_histories.h"
 #include "data/data_chat_filters.h"
 #include "data/data_peer_values.h"
@@ -329,6 +330,8 @@ private:
 	void addViewDiscussion();
 	void addDirectMessages();
 	void addToggleTopicClosed();
+	void addToggleTopicHidden();
+	void addShowHiddenTopics();
 	void addExportChat();
 	void addTranslate();
 	void addReport();
@@ -1215,6 +1218,33 @@ void Filler::addDeleteContact() {
 	});
 }
 
+void Filler::addToggleTopicHidden() {
+	if (!_topic || _topic->creating()) {
+		return;
+	}
+	const auto weak = base::make_weak(_topic);
+	_addAction(u"Hide topic"_q, [=] {
+		if (const auto strong = weak.get()) {
+			Data::HideTopic(strong);
+		}
+	}, &st::menuIconStealth);
+}
+
+void Filler::addShowHiddenTopics() {
+	const auto count = (_peer && _peer->isForum())
+		? Data::HiddenTopicsCount(_peer->id)
+		: 0;
+	if (!count) {
+		return;
+	}
+	const auto peer = _peer;
+	_addAction(u"Show hidden topics (%1)"_q.arg(count), [=] {
+		if (const auto forum = peer->forum()) {
+			Data::ShowHiddenTopics(forum);
+		}
+	}, &st::menuIconShowAll);
+}
+
 void Filler::addDeleteTopic() {
 	if (!_topic || !_topic->canDelete()) {
 		return;
@@ -1867,6 +1897,7 @@ void Filler::fillChatsListActions() {
 	if (all.size() > kTopicsSearchMinCount) {
 		addSearchTopics();
 	}
+	addShowHiddenTopics();
 	addManageChat();
 	addNewMembers();
 	addBoostChat();
@@ -1921,6 +1952,8 @@ void Filler::fillContextMenuActions() {
 	addToggleMuteSubmenu(false);
 	addToggleUnreadMark();
 	addToggleTopicClosed();
+	addToggleTopicHidden();
+	addShowHiddenTopics();
 	addToggleFolder();
 	if (const auto user = _peer->asUser()) {
 		if (!user->isContact()) {
